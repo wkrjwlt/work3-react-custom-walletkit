@@ -1,0 +1,8 @@
+src/
+demo/
+.vscode/
+.idea/
+tsconfig.json
+tsup.config.js
+*.log
+test/

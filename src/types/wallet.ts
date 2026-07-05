@@ -11,4 +11,5 @@ export interface ConnectedWallet {
   id: WalletId;
   address: string;
   chainId?: number;
+  balance?: string; // balance in wei as string
 }

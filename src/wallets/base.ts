@@ -3,4 +3,7 @@ export abstract class BaseWalletAdapter {
   abstract name: string;
   abstract connect(): Promise<string[]>;
   abstract disconnect(): Promise<void>;
+  getProvider(): any | null {
+    return null;
+  }
 }

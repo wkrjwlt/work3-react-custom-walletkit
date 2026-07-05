@@ -1,16 +1,18 @@
-import { BaseWalletAdapter } from './base';
+import InjectedAdapter from './injected';
 
-export class MetaMaskAdapter extends BaseWalletAdapter {
+export class MetaMaskAdapter extends InjectedAdapter {
   id = 'metamask';
   name = 'MetaMask';
 
-  async connect(): Promise<string[]> {
-    // placeholder implementation
-    return [];
-  }
-
-  async disconnect(): Promise<void> {
-    // placeholder
+  protected getInjectedProvider(): any | null {
+    const p = super.getInjectedProvider();
+    if (!p) return null;
+    // prefer provider flagged as MetaMask
+    // some providers expose a list of providers; handle basic case
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    if ((p as any).isMetaMask || (p as any).isCoinbaseWallet === false) return p;
+    return p;
   }
 }
 

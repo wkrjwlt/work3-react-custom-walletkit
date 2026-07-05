@@ -8,7 +8,7 @@ function App() {
     <WalletProvider>
       <div style={{ padding: 24 }}>
         <h1>Demo</h1>
-        <ConnectButton />
+        <ConnectButton showBalance />
       </div>
     </WalletProvider>
   );

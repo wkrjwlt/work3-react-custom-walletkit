@@ -12,6 +12,11 @@
 - 🎯 **内置真实钱包图标**（MetaMask、Coinbase、WalletConnect）
 - ⚙️ 支持修改钱包显示属性（名称、描述、图标等）
 - ✅ 支持启用/禁用钱包
+- 🔐 **安全登录** - 支持 nonce 签名验证和 JWT 生成
+- 🔄 **链切换** - 支持多链切换
+- ✍️ **消息签名** - 支持 signMessage 和 signTypedData
+- 📊 **状态管理** - 完整的钱包状态和错误处理
+- 🌐 **框架集成** - 支持 Next.js、React、Vite 等框架
 
 ## 安装
 
@@ -86,6 +91,85 @@ function App() {
 
 更多配置选项请查看 [钱包配置文档](docs/custom-wallet-config.md)。
 
+### 消息签名
+
+支持消息签名和 EIP-712 类型化数据签名：
+
+```tsx
+import { useWallet } from '@wkrjwlt/walletkit';
+
+function MyComponent() {
+  const { signMessage, address } = useWallet();
+
+  const handleSign = async () => {
+    try {
+      const signature = await signMessage('Hello, World!');
+      console.log('Signature:', signature);
+    } catch (error) {
+      console.error('Sign failed:', error);
+    }
+  };
+
+  return <button onClick={handleSign}>Sign Message</button>;
+}
+```
+
+### 钱包登录
+
+支持安全的钱包登录机制：
+
+```tsx
+import { walletLogin } from '@wkrjwlt/walletkit';
+import { useWallet } from '@wkrjwlt/walletkit';
+
+function LoginComponent() {
+  const { signMessage, isConnected } = useWallet();
+
+  const handleLogin = async () => {
+    if (!isConnected) return;
+
+    const token = await walletLogin({
+      signMessage: async (message) => await signMessage(message),
+      getProvider: () => window.ethereum,
+    }, 'My DApp');
+
+    console.log('JWT Token:', token);
+  };
+
+  return <button onClick={handleLogin}>Login with Wallet</button>;
+}
+```
+
+### 错误处理
+
+完整的错误处理和状态管理：
+
+```tsx
+import { useWallet } from '@wkrjwlt/walletkit';
+
+function MyComponent() {
+  const { status, error, address } = useWallet();
+
+  if (status === 'error') {
+    return <div>Error: {error?.message}</div>;
+  }
+
+  if (status === 'connecting') {
+    return <div>Connecting...</div>;
+  }
+
+  if (status === 'connected' && address) {
+    return <div>Connected: {address}</div>;
+  }
+
+  return <div>Not connected</div>;
+}
+```
+
+### 框架集成
+
+支持 Next.js、React、Vite 等主流框架。详细集成指南请查看 [框架集成文档](docs/framework-integration.md)。
+
 ## API
 
 ### WalletProvider
@@ -140,9 +224,12 @@ function MyComponent() {
     connect,           // 连接钱包函数
     disconnect,        // 断开连接函数
     switchChain,       // 切换链函数
+    signMessage,       // 签名消息函数（新增）
     connectors,        // wagmi connectors 列表
     walletActions,     // 自定义钱包操作列表（包含 name、icon、description 等）
     config,            // 钱包配置对象
+    status,            // 钱包状态（新增：disconnected | connecting | connected | error）
+    error,             // 错误信息（新增）
   } = useWallet();
 
   // 连接钱包
@@ -164,16 +251,34 @@ function MyComponent() {
     switchChain(1); // 切换到以太坊主网
   };
 
+  // 签名消息
+  const handleSignMessage = async () => {
+    try {
+      const signature = await signMessage('Hello, World!');
+      console.log('Signature:', signature);
+    } catch (error) {
+      console.error('签名失败:', error);
+    }
+  };
+
   // 显示自定义钱包列表
   return (
     <div>
+      <p>状态: {status}</p>
       <p>地址: {address}</p>
       <p>余额: {balance} ETH</p>
       <p>链 ID: {chainId}</p>
 
+      {error && (
+        <div className="error">
+          错误: {error.message}
+        </div>
+      )}
+
       <button onClick={handleConnect}>连接</button>
       <button onClick={handleDisconnect}>断开</button>
       <button onClick={handleSwitchChain}>切换链</button>
+      <button onClick={handleSignMessage}>签名</button>
 
       {/* 显示自定义钱包列表 */}
       {walletActions.map(wallet => (

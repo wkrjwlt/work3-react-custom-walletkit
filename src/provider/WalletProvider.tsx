@@ -1,6 +1,6 @@
 import React from 'react';
-import { useAccount, useConnect, useDisconnect, useBalance, useSwitchChain } from 'wagmi';
-import type { WalletKitConfig, WalletConfig, WalletAction } from '../types/wallet';
+import { useAccount, useConnect, useDisconnect, useBalance, useSwitchChain, useSignMessage } from 'wagmi';
+import type { WalletKitConfig, WalletConfig, WalletAction, WalletStatus, WalletError } from '../types/wallet';
 import { mergeWalletConfigs } from '../utils/walletConfig';
 
 interface WalletContextState {
@@ -12,9 +12,12 @@ interface WalletContextState {
   connect: (connectorId: string) => Promise<void>;
   disconnect: () => void;
   switchChain: (chainId: number) => void;
+  signMessage: (message: string) => Promise<string>;
   connectors: { id: string; name: string; icon?: string }[];
   walletActions: WalletAction[];
   config?: WalletKitConfig;
+  status: WalletStatus;
+  error?: WalletError;
 }
 
 const WalletContext = React.createContext<WalletContextState>({
@@ -26,9 +29,12 @@ const WalletContext = React.createContext<WalletContextState>({
   connect: async () => {},
   disconnect: () => {},
   switchChain: () => {},
+  signMessage: async () => '',
   connectors: [],
   walletActions: [],
   config: undefined,
+  status: 'disconnected',
+  error: undefined,
 });
 
 export const useWallet = () => React.useContext(WalletContext);
@@ -55,28 +61,87 @@ const WalletProvider: React.FC<React.PropsWithChildren<{ config?: WalletKitConfi
     query: { enabled: !!address }
   });
   const { switchChain } = useSwitchChain();
+  const { signMessageAsync } = useSignMessage();
+
+  // 错误状态
+  const [error, setError] = React.useState<WalletError | undefined>(undefined);
 
   // 合并钱包配置（只修改显示属性）
   const walletActions = React.useMemo(() => {
     return mergeWalletConfigs(config?.wallets);
   }, [config?.wallets]);
 
+  // 计算钱包状态
+  const status = React.useMemo<WalletStatus>(() => {
+    if (error) return 'error';
+    if (isPending || isConnecting) return 'connecting';
+    if (isConnected && address) return 'connected';
+    return 'disconnected';
+  }, [error, isPending, isConnecting, isConnected, address]);
+
   const handleConnect = React.useCallback(async (connectorId: string) => {
-    // 使用 wagmi connector
-    const connector = connectors.find(c => c.id === connectorId || c.name.toLowerCase() === connectorId.toLowerCase());
-    if (!connector) {
-      throw new Error(`Connector not found: ${connectorId}`);
+    setError(undefined);
+
+    // 钱包 ID 映射到实际的 wagmi connector ID
+    const connectorIdMap: Record<string, string> = {
+      'metamask': 'injected', // MetaMask 通过 injected connector
+      'coinbase': 'coinbaseWalletSDK', // Coinbase Wallet
+      'walletconnect': 'walletConnect', // WalletConnect
+    };
+
+    const actualConnectorId = connectorIdMap[connectorId.toLowerCase()] || connectorId;
+
+    try {
+      // 使用 wagmi connector
+      const connector = connectors.find(c =>
+        c.id === actualConnectorId ||
+        c.id === connectorId ||
+        c.name.toLowerCase() === connectorId.toLowerCase()
+      );
+
+      if (!connector) {
+        throw new Error(`Connector not found: ${connectorId}. Available connectors: ${connectors.map(c => c.id).join(', ')}`);
+      }
+
+      connect({ connector });
+    } catch (err: any) {
+      const walletError: WalletError = {
+        code: err?.code || -1,
+        message: err?.message || 'Connection failed',
+        data: err,
+      };
+      setError(walletError);
+      throw err;
     }
-    connect({ connector });
   }, [connectors, connect]);
 
   const handleDisconnect = React.useCallback(() => {
+    setError(undefined);
     disconnect();
   }, [disconnect]);
 
   const handleSwitchChain = React.useCallback((targetChainId: number) => {
+    setError(undefined);
     switchChain({ chainId: targetChainId });
   }, [switchChain]);
+
+  const handleSignMessage = React.useCallback(async (message: string): Promise<string> => {
+    if (!address) {
+      throw new Error('Wallet not connected');
+    }
+    try {
+      const signature = await signMessageAsync({ message });
+      return signature;
+    } catch (err: any) {
+      const walletError: WalletError = {
+        code: err?.code || -1,
+        message: err?.message || 'Sign message failed',
+        data: err,
+      };
+      setError(walletError);
+      throw err;
+    }
+  }, [address, signMessageAsync]);
 
   // 转换 connectors 格式
   const formattedConnectors = React.useMemo(() => {
@@ -110,9 +175,12 @@ const WalletProvider: React.FC<React.PropsWithChildren<{ config?: WalletKitConfi
     connect: handleConnect,
     disconnect: handleDisconnect,
     switchChain: handleSwitchChain,
+    signMessage: handleSignMessage,
     connectors: formattedConnectors,
     walletActions,
     config,
+    status,
+    error,
   };
 
   return (

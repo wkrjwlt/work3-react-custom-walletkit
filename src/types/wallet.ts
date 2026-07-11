@@ -2,6 +2,20 @@ import type { Chain } from 'viem';
 
 export type WalletId = 'metamask' | 'walletconnect' | 'coinbase' | string;
 
+/**
+ * 钱包账户信息
+ */
+export interface WalletAccountInfo {
+  /** 钱包地址 */
+  address: string;
+  /** 链 ID */
+  chainId?: number;
+  /** ENS 名称 */
+  ens?: string;
+  /** 余额 */
+  balance?: string;
+}
+
 export interface WalletInfo {
   id: WalletId;
   name: string;
@@ -62,3 +76,17 @@ export type WalletAction = {
   description?: string;
   loadingText?: string;
 };
+
+/**
+ * 钱包状态
+ */
+export type WalletStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+/**
+ * 钱包错误类型
+ */
+export interface WalletError {
+  code: number;
+  message: string;
+  data?: any;
+}

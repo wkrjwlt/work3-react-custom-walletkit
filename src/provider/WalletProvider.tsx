@@ -1,149 +1,126 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { WalletContext } from './context';
-import type { ConnectedWallet } from '../types/wallet';
-import { MetaMaskAdapter } from '../wallets/metamask';
-import { CoinbaseAdapter } from '../wallets/coinbase';
-import { WalletConnectAdapter } from '../wallets/walletconnect';
+import React from 'react';
+import { useAccount, useConnect, useDisconnect, useBalance, useSwitchChain } from 'wagmi';
+import type { WalletKitConfig, WalletConfig, WalletAction } from '../types/wallet';
+import { mergeWalletConfigs } from '../utils/walletConfig';
 
-type AdapterInstance = {
-  id: string;
-  instance: any;
+interface WalletContextState {
+  address?: `0x${string}` | undefined;
+  isConnected: boolean;
+  isConnecting: boolean;
+  chainId?: number;
+  balance?: string;
+  connect: (connectorId: string) => Promise<void>;
+  disconnect: () => void;
+  switchChain: (chainId: number) => void;
+  connectors: { id: string; name: string; icon?: string }[];
+  walletActions: WalletAction[];
+  config?: WalletKitConfig;
+}
+
+const WalletContext = React.createContext<WalletContextState>({
+  address: undefined,
+  isConnected: false,
+  isConnecting: false,
+  chainId: undefined,
+  balance: undefined,
+  connect: async () => {},
+  disconnect: () => {},
+  switchChain: () => {},
+  connectors: [],
+  walletActions: [],
+  config: undefined,
+});
+
+export const useWallet = () => React.useContext(WalletContext);
+
+// 钱包图标映射 - 支持多种 id 格式
+const WALLET_ICONS: Record<string, string> = {
+  // MetaMask
+  metamask: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyOCIgaGVpZ2h0PSIyOCIgZmlsbD0ibm9uZSIgdmlld0JveD0iMCAwIDI4IDI4Ij48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMCAwaDI4djI4SDB6Ii8+PGcgY2xpcC1wYXRoPSJ1cmwoI2EpIj48cGF0aCBmaWxsPSIjZmY1YzE2IiBkPSJtMjQuMDI0IDIzLjgyNC00Ljg0Ni0xLjQzNC0zLjY1NSAyLjE3Mi0yLjU1LS4wMDEtMy42NTYtMi4xNzEtNC44NDQgMS40MzRMMyAxOC44OGwxLjQ3My01LjQ4OEwzIDguNzUxIDQuNDczIDNsNy41NjkgNC40OTZoNC40MTNMMjQuMDI0IDNsMS40NzMgNS43NTEtMS40NzMgNC42NCAxLjQ3MyA1LjQ4OHoiLz48cGF0aCBmaWxsPSIjZmY1YzE2IiBkPSJtNC40NzQgMyA3LjU3IDQuNDk5LS4zMDIgMy4wODd6bTQuODQ0IDE1Ljg4MSAzLjMzIDIuNTIyLTMuMzMuOTg3em0zLjA2NC00LjE3LS42NC00LjEyMy00LjA5NyAyLjgwNGgtLjAwMnYuMDAxbC4wMTMgMi44ODYgMS42NjEtMS41Njd6TTI0LjAyNCAzbC03LjU3IDQuNDk5LjMgMy4wODd6TTE5LjE4IDE4Ljg4MWwtMy4zMyAyLjUyMiAzLjMzLjk4N3ptMS42NzQtNS40ODh2LS4wMDJsLTQuMDk3LTIuODA0LS42NCA0LjEyNGgzLjA2NGwxLjY2MiAxLjU2N3oiLz48cGF0aCBmaWxsPSIjZTM0ODA3IiBkPSJtOS4zMTcgMjIuMzktNC44NDQgMS40MzRMMyAxOC44ODFoNi4zMTd6bTMuMDY0LTcuNjguOTI1IDUuOTYyLTEuMjgyLTMuMzE1LTQuMzctMS4wNzggMS42NjItMS41Njh6bTYuNzk5IDcuNjggNC44NDQgMS40MzQgMS40NzMtNC45NDNIMTkuMTh6bS0zLjA2NC03LjY4LS45MjUgNS45NjIgMS4yODItMy4zMTUgNC4zNy0xLjA3OC0xLjY2My0xLjU2OHoiLz48cGF0aCBmaWxsPSIjZmY4ZDVkIiBkPSJtMyAxOC44OCAxLjQ3My01LjQ4OWgzLjE2OWwuMDEyIDIuODg3IDQuMzcgMS4wNzggMS4yODIgMy4zMTQtLjY1OS43My0zLjMzLTIuNTIySDN6bTIyLjQ5NyAwLTEuNDczLTUuNDg5aC0zLjE3bC0uMDEgMi44ODctNC4zNzEgMS4wNzgtMS4yODIgMy4zMTQuNjU5LjczIDMuMzMtMi41MjJoNi4zMTd6TTE2LjQ1NSA3LjQ5NWgtNC40MTNsLS4zIDMuMDg3IDEuNTY1IDEwLjA4NGgxLjg4NGwxLjU2NS0xMC4wODR6Ii8+PHBhdGggZmlsbD0iIzY2MTgwMCIgZD0iTTQuNDczIDMgMyA4Ljc1MWwxLjQ3MyA0LjY0aDMuMTY5bDQuMS0yLjgwNXptNi45OTIgMTIuOTA4SDEwLjAzbC0uNzgxLjc2MSAyLjc3Ni42ODUtLjU2LTEuNDQ3TTI0LjAyNCAzbDEuNDczIDUuNzUxLTEuNDczIDQuNjRoLTMuMTdsLTQuMDk4LTIuODA1em0tNi45OSAxMi45MDhoMS40MzdsLjc4Mi43NjItMi43OC42ODYuNTYtMS40NXptLTEuNTEyIDYuNjg3LjMyOC0xLjE5My0uNjYtLjczaC0xLjg4NWwtLjY1OS43My4zMjcgMS4xOTIiLz48cGF0aCBmaWxsPSIjYzBjNGNkIiBkPSJNMTUuNTIyIDIyLjU5NHYxLjk2OWgtMi41NDh2LTEuOTY5eiIvPjxwYXRoIGZpbGw9IiNlN2ViZjYiIGQ9Im05LjMxOCAyMi4zODggMy42NTggMi4xNzR2LTEuOTY5bC0uMzI4LTEuMTkyem05Ljg2MiAwLTMuNjU4IDIuMTc0di0xLjk2OWwuMzI4LTEuMTkyeiIvPjwvZz48ZGVmcz48Y2xpcFBhdGggaWQ9ImEiPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0zIDNoMjIuNXYyMS41NjNIM3oiLz48L2NsaXBQYXRoPjwvZGVmcz48L3N2Zz4=',
+  'io.metamask': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyOCIgaGVpZ2h0PSIyOCIgZmlsbD0ibm9uZSIgdmlld0JveD0iMCAwIDI4IDI4Ij48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMCAwaDI4djI4SDB6Ii8+PGcgY2xpcC1wYXRoPSJ1cmwoI2EpIj48cGF0aCBmaWxsPSIjZmY1YzE2IiBkPSJtMjQuMDI0IDIzLjgyNC00Ljg0Ni0xLjQzNC0zLjY1NSAyLjE3Mi0yLjU1LS4wMDEtMy42NTYtMi4xNzEtNC44NDQgMS40MzRMMyAxOC44OGwxLjQ3My01LjQ4OEwzIDguNzUxIDQuNDczIDNsNy41NjkgNC40OTZoNC40MTNMMjQuMDI0IDNsMS40NzMgNS43NTEtMS40NzMgNC42NCAxLjQ3MyA1LjQ4OHoiLz48cGF0aCBmaWxsPSIjZmY1YzE2IiBkPSJtNC40NzQgMyA3LjU3IDQuNDk5LS4zMDIgMy4wODd6bTQuODQ0IDE1Ljg4MSAzLjMzIDIuNTIyLTMuMzMuOTg3em0zLjA2NC00LjE3LS42NC00LjEyMy00LjA5NyAyLjgwNGgtLjAwMnYuMDAxbC4wMTMgMi44ODYgMS42NjEtMS41Njd6TTI0LjAyNCAzbC03LjU3IDQuNDk5LjMgMy4wODd6TTE5LjE4IDE4Ljg4MWwtMy4zMyAyLjUyMiAzLjMzLjk4N3ptMS42NzQtNS40ODh2LS4wMDJsLTQuMDk3LTIuODA0LS42NCA0LjEyNGgzLjA2NGwxLjY2MiAxLjU2N3oiLz48cGF0aCBmaWxsPSIjZTM0ODA3IiBkPSJtOS4zMTcgMjIuMzktNC44NDQgMS40MzRMMyAxOC44ODFoNi4zMTd6bTMuMDY0LTcuNjguOTI1IDUuOTYyLTEuMjgyLTMuMzE1LTQuMzctMS4wNzggMS42NjItMS41Njh6bTYuNzk5IDcuNjggNC44NDQgMS40MzQgMS40NzMtNC45NDNIMTkuMTh6bS0zLjA2NC03LjY4LS45MjUgNS45NjIgMS4yODItMy4zMTUgNC4zNy0xLjA3OC0xLjY2My0xLjU2OHoiLz48cGF0aCBmaWxsPSIjZmY4ZDVkIiBkPSJtMyAxOC44OCAxLjQ3My01LjQ4OWgzLjE2OWwuMDEyIDIuODg3IDQuMzcgMS4wNzggMS4yODIgMy4zMTQtLjY1OS43My0zLjMzLTIuNTIySDN6bTIyLjQ5NyAwLTEuNDczLTUuNDg5aC0zLjE3bC0uMDEgMi44ODctNC4zNzEgMS4wNzgtMS4yODIgMy4zMTQuNjU5LjczIDMuMzMtMi41MjJoNi4zMTd6TTE2LjQ1NSA3LjQ5NWgtNC40MTNsLS4zIDMuMDg3IDEuNTY1IDEwLjA4NGgxLjg4NGwxLjU2NS0xMC4wODR6Ii8+PHBhdGggZmlsbD0iIzY2MTgwMCIgZD0iTTQuNDczIDMgMyA4Ljc1MWwxLjQ3MyA0LjY0aDMuMTY5bDQuMS0yLjgwNXptNi45OTIgMTIuOTA4SDEwLjAzbC0uNzgxLjc2MSAyLjc3Ni42ODUtLjU2LTEuNDQ3TTI0LjAyNCAzbDEuNDczIDUuNzUxLTEuNDczIDQuNjRoLTMuMTdsLTQuMDk4LTIuODA1em0tNi45OSAxMi45MDhoMS40MzdsLjc4Mi43NjItMi43OC42ODYuNTYtMS40NXptLTEuNTEyIDYuNjg3LjMyOC0xLjE5My0uNjYtLjczaC0xLjg4NWwtLjY1OS43My4zMjcgMS4xOTIiLz48cGF0aCBmaWxsPSIjYzBjNGNkIiBkPSJNMTUuNTIyIDIyLjU5NHYxLjk2OWgtMi41NDh2LTEuOTY5eiIvPjxwYXRoIGZpbGw9IiNlN2ViZjYiIGQ9Im05LjMxOCAyMi4zODggMy42NTggMi4xNzR2LTEuOTY5bC0uMzI4LTEuMTkyem05Ljg2MiAwLTMuNjU4IDIuMTc0di0xLjk2OWwuMzI4LTEuMTkyeiIvPjwvZz48ZGVmcz48Y2xpcFBhdGggaWQ9ImEiPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0zIDNoMjIuNXYyMS41NjNIM3oiLz48L2NsaXBQYXRoPjwvZGVmcz48L3N2Zz4=',
+  // Coinbase Wallet
+  coinbase: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDQwIDQwIiBmaWxsPSJub25lIj48cmVjdCB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHJ4PSI4IiBmaWxsPSIjMDA1MkZGIi8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwIDhDMTMuMzczIDggOCAxMy4zNzMgOCAyMGMwIDYuNjI3IDUuMzczIDEyIDEyIDEyYzYuNjI3IDAgMTItNS4zNzMgMTItMTJDMzIgMTMuMzczIDI2LjYyNyA4IDIwIDh6bTAgMTljLTMuODY2IDAtNy0zLjEzNC03LTdzMy4xMzQtNyA3LTdzNyAzLjEzNCA3IDctMy4xMzQgNy03IDd6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwIDE0Yy0zLjMxNCAwLTYgMi42ODYtNiA2czIuNjg2IDYgNiA2IDYtMi42ODYgNi02LTIuNjg2LTYtNi02em0zIDZjMCAxLjY1Ny0xLjM0MyAzLTMgM3MtMy0xLjM0My0zLTMgMS4zNDMtMyAzLTMgMyAxLjM0MyAzIDN6Ii8+PC9zdmc+',
+  coinbasewallet: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDQwIDQwIiBmaWxsPSJub25lIj48cmVjdCB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHJ4PSI4IiBmaWxsPSIjMDA1MkZGIi8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwIDhDMTMuMzczIDggOCAxMy4zNzMgOCAyMGMwIDYuNjI3IDUuMzczIDEyIDEyIDEyYzYuNjI3IDAgMTItNS4zNzMgMTItMTJDMzIgMTMuMzczIDI2LjYyNyA4IDIwIDh6bTAgMTljLTMuODY2IDAtNy0zLjEzNC03LTdzMy4xMzQtNyA3LTdzNyAzLjEzNCA3IDctMy4xMzQgNy03IDd6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwIDE0Yy0zLjMxNCAwLTYgMi42ODYtNiA2czIuNjg2IDYgNiA2IDYtMi42ODYgNi02LTIuNjg2LTYtNi02em0zIDZjMCAxLjY1Ny0xLjM0MyAzLTMgM3MtMy0xLjM0My0zLTMgMS4zNDMtMyAzLTMgMyAxLjM0MyAzIDN6Ii8+PC9zdmc+',
+  'coinbaseWalletSDK': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDQwIDQwIiBmaWxsPSJub25lIj48cmVjdCB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHJ4PSI4IiBmaWxsPSIjMDA1MkZGIi8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwIDhDMTMuMzczIDggOCAxMy4zNzMgOCAyMGMwIDYuNjI3IDUuMzczIDEyIDEyIDEyYzYuNjI3IDAgMTItNS4zNzMgMTItMTJDMzIgMTMuMzczIDI2LjYyNyA4IDIwIDh6bTAgMTljLTMuODY2IDAtNy0zLjEzNC03LTdzMy4xMzQtNyA3LTdzNyAzLjEzNCA3IDctMy4xMzQgNy03IDd6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIwIDE0Yy0zLjMxNCAwLTYgMi42ODYtNiA2czIuNjg2IDYgNiA2IDYtMi42ODYgNi02LTIuNjg2LTYtNi02em0zIDZjMCAxLjY1Ny0xLjM0MyAzLTMgM3MtMy0xLjM0My0zLTMgMS4zNDMtMyAzLTMgMyAxLjM0MyAzIDN6Ii8+PC9zdmc+',
+  // WalletConnect
+  walletconnect: 'data:image/svg+xml;base64,PHN2ZyBoZWlnaHQ9IjMxLjM0NTk2IiB2aWV3Qm94PSIwIDAgMzIgMzEuMzQ1OTYiIHdpZHRoPSIzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSIjM2I5OWZjIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Im0xNi4wMDEwOTUgOC4zOTgwMDE3YzQuMDQ3ODM2LS4wMDI4ODkgNy45MDQ2OTcgMS41MjU0NzkzIDEwLjc3MTAwOCA0LjI1MTI0OTNsMS4wODQ5NDEtMS4wNTY3MjljLTMuMjY4NjU4LTMuMTU0OTg3My03LjY4OTg1Ny00LjkzMTUyMjQtMTIuMjg4NzE0LTQuOTI4NjMzNy00LjU5ODg1NzcuMDAyODkwNi05LjAxNzQxMDcgMS43ODI1MTc0LTEyLjI4MzQ3MDcgNC45NDA0OTQ3bDEuMDg0NjM2NyAxLjA1NzQ2N2MyLjg2NDEwMTktMi43Mjk0NCA2LjcyMDY5MS00LjI2MDMxNTkgMTAuNjMxNTk5LTQuMjYzODQ4em0tLjAwMTIwNiA1LjM3NjA0OTNjMi4zMzYyMDEtLjAwMTY2NiA0LjU2MDYyMS44OCA2LjIxNDg0NSAyLjQ1NjY5MWwxLjA4NDYzNy0xLjA1NzQ2N2MtMi4wNzE4NzUtMS45OTgwMDEtNC44NzIwNDUtMy4xMjEyOTUtNy43OTc5MzctMy4xMjEyOTUtMi45MjU4OTIgMC01LjcyNjA2MiAxLjEyMzI5NC03Ljc5NzkzNyAzLjEyMTI5NWwxLjA4NDYzNyAxLjA1NzQ2N2MxLjY1MzYyOS0xLjU3NjEwNiAzLjg3NjkxOS0yLjQ1NTM5NiA2LjIxMTc1NS0yLjQ1NjY5MXptLjAwMTIwNiA1LjM3NjE1MWMuNjI3ODI4LS4wMDA0MTQgMS4yMjY4NzkuMjM2NTU3IDEuNjcwOTg3LjY2MDc4OWwxLjA4NDYzNy0xLjA1NzQ2N2MtMC43MzQwMTMtLjcxNDk2Ni0xLjcyNzIxNi0xLjExNzA5MS0yLjc1NTcyNC0xLjExNzA5MXMtMi4wMjE3MTEuNDAyMTI1LTIuNzU1NzI1IDEuMTE3MDkxbDEuMDg0NjM4IDEuMDU3NDY3Yy40NDM4MzQtLjQyMzk3IDEuMDQyNTQ0LS42NjA3ODkgMS42NzExODctLjY2MDc4OXptLTMuMzQwNzg4IDMuODMyNDQ2Yy0xLjAwMjI0NC45NzY1MTItMS4wMDIyNDQgMi41NTkzNjkgMCAzLjUzNTg4MXMghiI=',
 };
 
-const ADAPTERS: AdapterInstance[] = [
-  { id: 'metamask', instance: new MetaMaskAdapter() },
-  { id: 'coinbase', instance: new CoinbaseAdapter() },
-  { id: 'walletconnect', instance: new WalletConnectAdapter() },
-];
+const WalletProvider: React.FC<React.PropsWithChildren<{ config?: WalletKitConfig }>> = ({ children, config }) => {
+  const { address, isConnected, isConnecting, chainId } = useAccount();
+  const { connectors, connect, isPending } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { data: balanceData } = useBalance({
+    address,
+    query: { enabled: !!address }
+  });
+  const { switchChain } = useSwitchChain();
 
-export const WalletProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
-  const [wallet, setWallet] = useState<ConnectedWallet | null>(null);
-  const currentAdapter = useRef<any | null>(null);
+  // 合并钱包配置（只修改显示属性）
+  const walletActions = React.useMemo(() => {
+    return mergeWalletConfigs(config?.wallets);
+  }, [config?.wallets]);
 
-  const getChainId = useCallback(async (adapter: any): Promise<number | undefined> => {
-    try {
-      const provider = adapter.getProvider?.();
-      if (provider && typeof provider.request === 'function') {
-        const chainHex = await provider.request({ method: 'eth_chainId' });
-        if (chainHex) return parseInt(chainHex as string, 16);
-      }
-    } catch (e) {
-      // ignore
+  const handleConnect = React.useCallback(async (connectorId: string) => {
+    // 使用 wagmi connector
+    const connector = connectors.find(c => c.id === connectorId || c.name.toLowerCase() === connectorId.toLowerCase());
+    if (!connector) {
+      throw new Error(`Connector not found: ${connectorId}`);
     }
-    return undefined;
-  }, []);
+    connect({ connector });
+  }, [connectors, connect]);
 
-  const getBalance = useCallback(async (adapter: any, address: string): Promise<string | undefined> => {
-    try {
-      const provider = adapter.getProvider?.();
-      if (provider && typeof provider.request === 'function') {
-        const balance = await provider.request({ method: 'eth_getBalance', params: [address, 'latest'] });
-        if (balance) return balance as string;
+  const handleDisconnect = React.useCallback(() => {
+    disconnect();
+  }, [disconnect]);
+
+  const handleSwitchChain = React.useCallback((targetChainId: number) => {
+    switchChain({ chainId: targetChainId });
+  }, [switchChain]);
+
+  // 转换 connectors 格式
+  const formattedConnectors = React.useMemo(() => {
+    // 过滤掉通用的 'injected' connector，只保留具体的钱包
+    const filteredConnectors = connectors.filter(c => c.id !== 'injected');
+    return filteredConnectors.map(c => {
+      // 先尝试精确匹配
+      let iconKey = Object.keys(WALLET_ICONS).find(
+        key => key.toLowerCase() === c.id.toLowerCase()
+      );
+      // 如果精确匹配失败，再尝试名称匹配
+      if (!iconKey) {
+        iconKey = Object.keys(WALLET_ICONS).find(
+          key => key.toLowerCase() === c.name.toLowerCase().replace(/\s/g, '')
+        );
       }
-    } catch (e) {
-      // ignore
-    }
-    return undefined;
-  }, []);
+      return {
+        id: c.id,
+        name: c.name,
+        icon: c.icon || (iconKey ? WALLET_ICONS[iconKey] : undefined),
+      };
+    });
+  }, [connectors]);
 
-  const connect = useCallback(async (id: string) => {
-    const found = ADAPTERS.find(a => a.id === id);
-    if (!found) throw new Error(`Unknown wallet adapter: ${id}`);
-    const adapter = found.instance;
-    currentAdapter.current = adapter;
-
-    const accounts: string[] = await adapter.connect();
-    const address = accounts && accounts.length ? accounts[0] : '';
-
-    const chainId = await getChainId(adapter);
-    const balance = await getBalance(adapter, address);
-
-    const cw: ConnectedWallet = { id, address, chainId, balance };
-    setWallet(cw);
-    try {
-      localStorage.setItem('connectedWallet', JSON.stringify(cw));
-    } catch (e) {
-      // ignore storage errors
-    }
-  }, [getChainId, getBalance]);
-
-  const disconnect = useCallback(async () => {
-    try {
-      if (currentAdapter.current && typeof currentAdapter.current.disconnect === 'function') {
-        await currentAdapter.current.disconnect();
-      }
-    } catch (e) {
-      // ignore
-    }
-    currentAdapter.current = null;
-    setWallet(null);
-    try {
-      localStorage.removeItem('connectedWallet');
-    } catch (e) {}
-  }, []);
-
-  const switchNetwork = useCallback(async (chainId: number) => {
-    if (!currentAdapter.current) throw new Error('No wallet connected');
-    const provider = currentAdapter.current.getProvider?.();
-    if (!provider) throw new Error('Provider not available');
-    
-    try {
-      // Try wallet_switchEthereumChain (EIP-3326)
-      const chainHex = `0x${chainId.toString(16)}`;
-      await provider.request?.({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] });
-      
-      // Update wallet state with new chainId and refresh balance
-      if (wallet) {
-        const balance = await getBalance(currentAdapter.current, wallet.address);
-        const updated = { ...wallet, chainId, balance };
-        setWallet(updated);
-        try {
-          localStorage.setItem('connectedWallet', JSON.stringify(updated));
-        } catch (e) {}
-      }
-    } catch (error: any) {
-      // Handle user rejection or chain doesn't exist
-      if (error.code === 4902) {
-        throw new Error(`Chain ${chainId} not added to wallet`);
-      }
-      throw error;
-    }
-  }, [wallet, getBalance]);
-
-  // Attempt to auto-reconnect if a wallet was persisted
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const raw = localStorage.getItem('connectedWallet');
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as ConnectedWallet;
-        if (!parsed || !parsed.id) return;
-        // try silent connect for the same adapter
-        const found = ADAPTERS.find(a => a.id === parsed.id);
-        if (!found) return;
-        const adapter = found.instance;
-        currentAdapter.current = adapter;
-        const accounts: string[] = await adapter.connect();
-        const address = accounts && accounts.length ? accounts[0] : parsed.address;
-        const chainId = await getChainId(adapter);
-        const balance = await getBalance(adapter, address);
-        if (!mounted) return;
-        setWallet({ id: parsed.id, address, chainId, balance });
-      } catch (e) {
-        // cannot auto-reconnect — ignore
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [getChainId, getBalance]);
+  const value: WalletContextState = {
+    address,
+    isConnected,
+    isConnecting: isPending || isConnecting,
+    chainId,
+    balance: balanceData?.formatted,
+    connect: handleConnect,
+    disconnect: handleDisconnect,
+    switchChain: handleSwitchChain,
+    connectors: formattedConnectors,
+    walletActions,
+    config,
+  };
 
   return (
-    <WalletContext.Provider value={{ wallet, connect, disconnect, switchNetwork }}>
+    <WalletContext.Provider value={value}>
       {children}
     </WalletContext.Provider>
   );
 };
 
+export { WalletProvider };
 export default WalletProvider;

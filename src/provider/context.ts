@@ -3,7 +3,7 @@ import type { ConnectedWallet } from '../types/wallet';
 
 export interface WalletContextState {
   wallet?: ConnectedWallet | null;
-  connect: (id: string) => Promise<void>;
+  connect: (id: string, options?: { onUri?: (uri: string) => void }) => Promise<void>;
   disconnect: () => Promise<void>;
   switchNetwork: (chainId: number) => Promise<void>;
 }

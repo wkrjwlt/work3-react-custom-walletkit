@@ -4,6 +4,11 @@ export abstract class InjectedAdapter extends BaseWalletAdapter {
   protected provider: any | null = null;
 
   getProvider(): any | null {
+    if (this.provider) return this.provider;
+    const injected = this.getInjectedProvider();
+    if (injected) {
+      this.provider = injected;
+    }
     return this.provider;
   }
 

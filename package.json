@@ -1,42 +1,83 @@
 {
-  "name": "walletkit",
-  "version": "0.1.0",
-  "description": "A React wallet kit for Web3 integrations",
-  "main": "lib/index.cjs.js",
-  "module": "lib/index.esm.js",
+  "name": "@wkrjwlt/walletkit",
+  "version": "0.4.0",
+  "type": "module",
+  "description": "A React wallet kit for Web3 integrations - Support MetaMask, Coinbase Wallet and WalletConnect. Built on wagmi.",
+  "main": "lib/index.cjs",
+  "module": "lib/index.js",
   "types": "lib/index.d.ts",
   "files": [
     "lib"
   ],
+  "exports": {
+    ".": {
+      "import": "./lib/index.js",
+      "require": "./lib/index.cjs",
+      "types": "./lib/index.d.ts"
+    },
+    "./styles.css": "./lib/styles.css"
+  },
+  "sideEffects": false,
   "scripts": {
-    "build": "tsup",
+    "build:css": "tailwindcss -i src/styles.css -o lib/styles.css",
+    "build": "tsup && npm run build:css",
     "dev": "tsup --watch",
     "demo": "vite --config demo/vite.config.ts",
     "demo:build": "vite build --config demo/vite.config.ts",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "wallet",
     "web3",
-    "react"
+    "react",
+    "metamask",
+    "walletconnect",
+    "coinbase",
+    "ethereum",
+    "crypto",
+    "dapp",
+    "wagmi"
   ],
-  "author": "",
+  "author": "wkrjwlt",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wkrjwlt/walletkit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wkrjwlt/walletkit/issues"
+  },
+  "homepage": "https://github.com/wkrjwlt/walletkit#readme",
   "peerDependencies": {
+    "@tanstack/react-query": "^5.0.0",
     "react": ">=17",
-    "react-dom": ">=17"
+    "react-dom": ">=17",
+    "viem": "^2.0.0",
+    "wagmi": "^2.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.2",
+    "@tailwindcss/postcss": "^4.3.2",
+    "@tanstack/react-query": "^5.55.3",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.0.3",
+    "autoprefixer": "^10.5.2",
+    "postcss": "^8.5.16",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "tailwindcss": "^4.3.2",
     "tsup": "^6.0.0",
     "typescript": "^5.0.0",
-    "vite": "^8.1.3"
+    "viem": "^2.38.0",
+    "vite": "^8.1.3",
+    "wagmi": "^2.19.3"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
-    "@walletconnect/web3-provider": "^1.8.0"
+    "@wagmi/connectors": "^8.0.22"
   }
 }

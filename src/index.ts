@@ -4,5 +4,6 @@ export * from './components/ConnectButton';
 export * from './components/AccountInfo';
 export * from './types/wallet';
 export * from './wallets/base';
+export { wltWallet, isWltWalletInstalled } from './wallets/wlt-wallet';
 export { getDefaultWallets, mergeWalletConfigs } from './utils/walletConfig';
 export * from './utils/auth';

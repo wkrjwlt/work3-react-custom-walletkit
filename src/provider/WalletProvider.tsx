@@ -1,5 +1,5 @@
 import React from 'react';
-import { useAccount, useConnect, useDisconnect, useBalance, useSwitchChain, useSignMessage } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useSwitchChain, useSignMessage, usePublicClient } from 'wagmi';
 import type { WalletKitConfig, WalletConfig, WalletAction, WalletStatus, WalletError } from '../types/wallet';
 import { mergeWalletConfigs } from '../utils/walletConfig';
 
@@ -53,18 +53,98 @@ const WALLET_ICONS: Record<string, string> = {
 };
 
 const WalletProvider: React.FC<React.PropsWithChildren<{ config?: WalletKitConfig }>> = ({ children, config }) => {
-  const { address, isConnected, isConnecting, chainId } = useAccount();
+  const { address: wagmiAddress, isConnected: wagmiIsConnected, isConnecting, chainId: wagmiChainId } = useAccount();
   const { connectors, connect, isPending } = useConnect();
   const { disconnect } = useDisconnect();
-  const { data: balanceData } = useBalance({
-    address,
-    query: { enabled: !!address }
-  });
   const { switchChain } = useSwitchChain();
   const { signMessageAsync } = useSignMessage();
 
   // 错误状态
   const [error, setError] = React.useState<WalletError | undefined>(undefined);
+
+  // WLT 钱包独立状态（不走 wagmi）
+  const [wltAddress, setWltAddress] = React.useState<string | undefined>(undefined);
+  const [wltChainId, setWltChainId] = React.useState<number | undefined>(undefined);
+
+  // 合并 wagmi 和 WLT 的状态
+  const address = (wagmiAddress || wltAddress) as `0x${string}` | undefined;
+  const isConnected = wagmiIsConnected || !!wltAddress;
+  const chainId = wagmiChainId || wltChainId;
+
+  // 使用合并后的 address 查询余额
+  // wagmi 的 useBalance 在切换钱包时可能返回缓存的旧数据
+  // 所以用 direct RPC 查询确保余额正确
+  const [balance, setBalance] = React.useState<string | undefined>(undefined);
+  const publicClient = usePublicClient();
+
+  React.useEffect(() => {
+    console.log('[WalletKit Balance] useEffect triggered, address:', address, 'chainId:', chainId, 'publicClient:', !!publicClient, 'publicClient.chain?.id:', publicClient?.chain?.id);
+    if (!address || !publicClient) {
+      console.log('[WalletKit Balance] Missing address or publicClient, skipping');
+      setBalance(undefined);
+      return;
+    }
+
+    // 对于 WLT 钱包，必须等 chainId 可用后再查询余额
+    // 因为 WLT 钱包的 chainId 是异步获取的，而 publicClient 默认是 mainnet
+    // 如果 chainId 还没获取到，跳过本次查询（chainId 变化时会重新触发）
+    if (!wltAddress && !chainId) {
+      console.log('[WalletKit Balance] No chainId yet, skipping (will retry when chainId changes)');
+      return;
+    }
+    // WLT 钱包连接时，如果 chainId 还没到，跳过
+    if (wltAddress && !chainId) {
+      console.log('[WalletKit Balance] WLT connected but chainId not ready yet, skipping');
+      return;
+    }
+
+    let cancelled = false;
+
+    const queryBalance = async () => {
+      try {
+        const targetChainId = chainId || publicClient.chain?.id;
+        console.log('[WalletKit Balance] Querying balance for address:', address, 'targetChainId:', targetChainId, 'publicClient.chain?.id:', publicClient.chain?.id);
+
+        let balanceWei: bigint;
+
+        if (targetChainId && targetChainId !== publicClient.chain?.id && config?.rpcUrls?.[targetChainId]) {
+          // 链不匹配且有自定义 RPC URL，直接 RPC 调用
+          const rpcUrl = config.rpcUrls[targetChainId];
+          console.log('[WalletKit Balance] Using direct RPC:', rpcUrl);
+          const response = await fetch(rpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'eth_getBalance',
+              params: [address, 'latest'],
+              id: 1,
+            }),
+          });
+          const data = await response.json();
+          if (data.error) throw new Error(data.error.message);
+          balanceWei = BigInt(data.result);
+        } else {
+          // 使用 wagmi 的 publicClient（默认链）
+          balanceWei = await publicClient.getBalance({
+            address: address as `0x${string}`,
+          });
+        }
+
+        if (!cancelled) {
+          const ether = Number(balanceWei) / 1e18;
+          console.log('[WalletKit Balance] Balance received:', balanceWei.toString(), 'wei =', ether, 'ETH');
+          setBalance(ether.toString());
+        }
+      } catch (e: any) {
+        console.warn('[WalletKit Balance] Failed to fetch balance:', e);
+        if (!cancelled) setBalance(undefined);
+      }
+    };
+
+    queryBalance();
+    return () => { cancelled = true; };
+  }, [address, publicClient, chainId, wltAddress]);
 
   // 合并钱包配置（只修改显示属性）
   const walletActions = React.useMemo(() => {
@@ -80,24 +160,63 @@ const WalletProvider: React.FC<React.PropsWithChildren<{ config?: WalletKitConfi
   }, [error, isPending, isConnecting, isConnected, address]);
 
   const handleConnect = React.useCallback(async (connectorId: string) => {
+    console.log('[WalletKit] handleConnect called with:', connectorId);
     setError(undefined);
 
-    // 钱包 ID 映射到实际的 wagmi connector ID
-    const connectorIdMap: Record<string, string> = {
-      'metamask': 'injected', // MetaMask 通过 injected connector
-      'coinbase': 'coinbaseWalletSDK', // Coinbase Wallet
-      'walletconnect': 'walletConnect', // WalletConnect
-    };
-
-    const actualConnectorId = connectorIdMap[connectorId.toLowerCase()] || connectorId;
-
     try {
-      // 使用 wagmi connector
-      const connector = connectors.find(c =>
-        c.id === actualConnectorId ||
-        c.id === connectorId ||
-        c.name.toLowerCase() === connectorId.toLowerCase()
-      );
+      // WLT Wallet 直接使用 window.wltwallet，不走 wagmi 的 injected connector
+      if (connectorId === 'wlt') {
+        const wltProvider = (window as any).wltwallet;
+        if (wltProvider && wltProvider.isWltWallet) {
+          const result = await wltProvider.request({ method: 'eth_requestAccounts' });
+
+          // 检查返回结果是否有错误
+          if (result && typeof result === 'object' && result.error) {
+            throw new Error(result.error);
+          }
+
+          const accounts = Array.isArray(result) ? result : [];
+
+          if (accounts && accounts.length > 0) {
+            console.log('[WalletKit] WLT Wallet connected:', accounts[0]);
+            // 先更新地址状态，让 UI 立即响应
+            setWltAddress(accounts[0]);
+            // 异步获取 chainId（不阻塞连接流程）
+            wltProvider.request({ method: 'eth_chainId' }).then((chainIdResult: any) => {
+              if (chainIdResult) {
+                console.log('[WalletKit] WLT chainId:', chainIdResult);
+                setWltChainId(parseInt(chainIdResult, 16));
+              }
+            }).catch((e: any) => {
+              console.warn('[WalletKit] Failed to get chainId:', e);
+            });
+          } else {
+            throw new Error('未找到账户，请先在 WLT 钱包中创建或导入钱包');
+          }
+          return;
+        } else {
+          throw new Error('WLT Wallet 未安装或未初始化');
+        }
+      }
+
+      let connector;
+
+      // MetaMask 使用 injected connector
+      if (connectorId === 'metamask') {
+        connector = connectors.find(c => c.id === 'injected');
+      } else {
+        // 其他钱包通过 ID 查找
+        const connectorIdMap: Record<string, string> = {
+          'coinbase': 'coinbaseWalletSDK',
+          'walletconnect': 'walletConnect',
+        };
+        const actualConnectorId = connectorIdMap[connectorId.toLowerCase()] || connectorId;
+        connector = connectors.find(c =>
+          c.id === actualConnectorId ||
+          c.id === connectorId ||
+          c.name.toLowerCase() === connectorId.toLowerCase()
+        );
+      }
 
       if (!connector) {
         throw new Error(`Connector not found: ${connectorId}. Available connectors: ${connectors.map(c => c.id).join(', ')}`);
@@ -117,6 +236,8 @@ const WalletProvider: React.FC<React.PropsWithChildren<{ config?: WalletKitConfi
 
   const handleDisconnect = React.useCallback(() => {
     setError(undefined);
+    setWltAddress(undefined);
+    setWltChainId(undefined);
     disconnect();
   }, [disconnect]);
 
@@ -171,7 +292,7 @@ const WalletProvider: React.FC<React.PropsWithChildren<{ config?: WalletKitConfi
     isConnected,
     isConnecting: isPending || isConnecting,
     chainId,
-    balance: balanceData?.formatted,
+    balance: balance,
     connect: handleConnect,
     disconnect: handleDisconnect,
     switchChain: handleSwitchChain,

@@ -16,6 +16,15 @@ export function getDefaultWallets(): WalletConfig[] {
       visible: true,
     },
     {
+      id: 'wlt',
+      name: 'WLT Wallet',
+      icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23e94560'/><text x='50' y='65' font-size='40' fill='white' text-anchor='middle' font-family='Arial' font-weight='bold'>W</text></svg>",
+      description: 'WLT 自定义钱包，支持助记词导入和多账户管理。',
+      loadingText: '正在连接 WLT Wallet...',
+      enabled: true,
+      visible: true,
+    },
+    {
       id: 'coinbase',
       name: 'Coinbase Wallet',
       icon: coinbaseIcon,

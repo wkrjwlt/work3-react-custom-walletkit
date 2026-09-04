@@ -47,6 +47,8 @@ export interface WalletKitConfig {
   chains?: Chain[];
   /** 钱包配置列表（用于修改默认钱包的显示属性） */
   wallets?: WalletConfig[];
+  /** 各链的 RPC URL（用于查询不同链上的余额） */
+  rpcUrls?: Record<number, string>;
   /** 自定义样式配置 */
   theme?: {
     /** 主色调 */
